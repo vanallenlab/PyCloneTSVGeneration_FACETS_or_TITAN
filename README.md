@@ -10,7 +10,7 @@ Usage:
         output_folder`
 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-From TITAN instructions:
+From PyClone instructions:
 
 TSV Input File
 The build_mutations_file takes a tab delimited file with a header as input and produces a YAML formatted file which can be used for running a PyClone analysis. Example files are contained in the examples/mixing/tsv folder which ships with the PyClone software.
