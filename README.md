@@ -1,12 +1,12 @@
 # PyCloneTSVGenerationWithTitan
-Combine snv maf, indel maf, and titan allelic copy number calls to generate the tab-delimited file used as input to
-PyClone's build_mutations_file script.
+Combine snv maf, indel maf, and TITAN or FACETS allelic copy number calls to generate the tab-delimited file used as input to
+PyClone's build_mutations_file script. Use the 'titan_output' flag to specify a TITAN CNA file, and the 'facets_output' flag to specify a FACETS CNA file.
 
 Usage:
     `generate_wgs_pyclone_input.py
         SNVs_OxoGFFPE/GCT001-TP-NT-SM-DPBZL-SM-DPBZK.ffpeBias.maf.annotated
         Indels/GCT001-TP-NT-SM-DPBZL-SM-DPBZK.indel.wgs.maf.annotated
-        CNAs/GCT001-TP-NT-SM-DPBZL-SM-DPBZK.titan.optimalClust_ploidy2.segs.txt
+        --titan_output CNAs/GCT001-TP-NT-SM-DPBZL-SM-DPBZK.titan.optimalClust_ploidy2.segs.txt
         output_folder`
 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
