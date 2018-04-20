@@ -11,9 +11,9 @@ Usage:
     generate_wgs_pyclone_input.py 
         SNVs_OxoGFFPE/GCT001-TP-NT-SM-DPBZL-SM-DPBZK.ffpeBias.maf.annotated 
         Indels/GCT001-TP-NT-SM-DPBZL-SM-DPBZK.indel.wgs.maf.annotated 
-        CNAs/GCT001-TP-NT-SM-DPBZL-SM-DPBZK.titan.optimalClust_ploidy2.segs.txt 
+        --facets_output/titan_output CNAs/GCT001-TP-NT-SM-DPBZL-SM-DPBZK.titan.optimalClust_ploidy2.segs.txt 
         output_folder
-
+        
 Generate the tab-delimited file used as input to the build_mutations_file script for PyClone.
 
 """
@@ -29,6 +29,14 @@ class TitanCols:
     END = "End_Position(bp)"
     MAJOR_CN = "MajorCN"
     MINOR_CN = "MinorCN"
+
+
+class FacetsCols:
+    CHR = "chrom"
+    START = "start"
+    END = "end"
+    TOTAL_CN = "tcn.em"
+    MINOR_CN = "lcn.em"
 
 
 class MafCols:
@@ -55,7 +63,7 @@ def mutation_id(row):
 
 
 def center_position(row):
-    """Find the point halfway betwee the start and end of the mutation -- relevant for SNVs"""
+    """Find the point halfway between the start and end of the mutation -- relevant for SNVs and indels"""
     start_int = int(row[MafCols.START])
     end_int = int(row[MafCols.END])
     length = end_int - start_int
@@ -91,37 +99,53 @@ def total_copy_number_based_on_sex_and_chrom(sex, chrom):
         return DEFAULT_CELL_COPY_NUMBER
 
 
-def build_titan_search_tree(titan_df, sex):
+def build_chrom_map(titan_df, sex, input_type='titan'):
     """Given a dataframe of Titan data, build a dictionary where the chromosomes are the keys and the values
     are the segments"""
     chr_map = defaultdict(lambda: defaultdict(dict))
     for index, row in titan_df.iterrows():
-        chrom = str(row[TitanCols.CHR])
-        chr_map[chrom][row[TitanCols.START]] = {"end": row[TitanCols.END],
-                                                             "major_cn": row[TitanCols.MAJOR_CN],
-                                                             "minor_cn": row[TitanCols.MINOR_CN],
-                                                             "normal_cn": total_copy_number_based_on_sex_and_chrom(sex, chrom)
-                                                             }
+        if input_type == 'titan':
+            chrom = str(row[TitanCols.CHR])
+            major_cn = row[TitanCols.MAJOR_CN]
+            minor_cn = row[TitanCols.MINOR_CN]
+            start = row[TitanCols.START]
+            end = row[TitanCols.END]
+        elif input_type == 'facets':
+            try:
+                chrom = str(row[FacetsCols.CHR])
+                minor_cn = int(row[FacetsCols.MINOR_CN])
+                total_cn = int(row[FacetsCols.TOTAL_CN])
+                major_cn = total_cn - minor_cn
+                start = row[FacetsCols.START]
+                end = row[FacetsCols.END]
+            except:
+                pass
+
+        chr_map[chrom][start] = {"end": end,
+                                 "major_cn": major_cn,
+                                 "minor_cn": minor_cn,
+                                 "normal_cn": total_copy_number_based_on_sex_and_chrom(sex, chrom)
+                                 }
     return chr_map
 
 
-def add_cn_info_to_indel_snv_maf(indel_snv_maf, titan_search_tree, sex):
+def add_cn_info_to_indel_snv_maf(indel_snv_maf, chrom_map, sex):
     """Add the titan allelic copy number information to the combined snv indel maf"""
-    titan_chrs = titan_search_tree.keys()
+    all_chrs = chrom_map.keys()
 
     def major_and_minor_cns(combined_maf_row):
-        # For all rows where the chromosome isn't even in the titan search tree, set the minor and major alleles to the
+        # For all rows where the chromosome isn't even in the search tree, set the minor and major alleles to the
         # default, non-aneuploidy values
         chrom = combined_maf_row[MafCols.CHR]
         position = combined_maf_row["Center_Position"]
 
-        if chrom not in titan_chrs:
+        if chrom not in all_chrs:
             return DEFAULT_MAJOR_COPY_NUMBER, DEFAULT_MINOR_COPY_NUMBER, total_copy_number_based_on_sex_and_chrom(sex, chrom)
         else:
-            starts = list(titan_search_tree[chrom].keys())
+            starts = list(chrom_map[chrom].keys())
             start_index = np.searchsorted(starts, position)
             relevant_start = starts[start_index - 1]
-            seg = titan_search_tree[chrom][relevant_start]
+            seg = chrom_map[chrom][relevant_start]
             if seg.get("end") >= position:
                 return seg.get("major_cn"), seg.get("minor_cn"), seg.get("normal_cn")
             else:
@@ -150,18 +174,28 @@ def main():
                                         ' GATK indel file, and TITAN output')
     parser.add_argument('snv_maf', metavar='snv_maf', type=str)
     parser.add_argument('indel_maf', metavar='indel_maf', type=str)
-    parser.add_argument('titan_output', metavar='titan_output', type=str)
+    parser.add_argument('--titan_output', metavar='titan_output', type=str)
+    parser.add_argument('--facets_output', metavar='facets_output', type=str)
     parser.add_argument('output_dir', metavar='output_dir', type=str)
     parser.add_argument('--handle', metavar='handle', type=str)
     args = parser.parse_args()
 
     snv_maf = args.snv_maf
     indel_maf = args.indel_maf
-    titan_output = args.titan_output
+
+    if args.titan_output:
+        cn_output = args.titan_output
+        input_type = 'titan'
+    elif args.facets_output:
+        cn_output = args.facets_output
+        input_type = 'facets'
+    else:
+        sys.exit('Either a titan or facets output file must be provided with allelic copy number information')
+
     handle = args.handle
     if not handle:
         # If not analysis handle is provided, simply name the file after the titan output file prefix
-        handle = os.path.split(titan_output)[-1].split('.')[0]
+        handle = os.path.split(cn_output)[-1].split('.')[0]
 
     output_dir = args.output_dir
 
@@ -171,24 +205,29 @@ def main():
     sys.stdout.write("Combining SNV and indel maf file data...\n")
     indel_snv_maf = combine_snv_and_indel_mafs(snv_maf_df, indel_maf_df)
 
-    sys.stdout.write("Loading Titan data...\n")
-    titan_df = pd.read_csv(titan_output, delimiter='\t', comment='#', header='infer')
+    sys.stdout.write("Loading CNA data...\n")
+    cn_df = pd.read_csv(cn_output, delimiter='\t', comment='#', header='infer')
 
-    # Build a data structure that allows for easier searching across the Titan data
+    # Build a data structure that allows for easier searching across the CNA data
     sex = get_sex(snv_maf_df)
-    titan_search_tree = build_titan_search_tree(titan_df, sex)
+    chrom_map = build_chrom_map(cn_df, sex, input_type)
 
     sys.stdout.write("Merging copy number, SNV, and indel information...\n")
-    final_df = add_cn_info_to_indel_snv_maf(indel_snv_maf, titan_search_tree, sex)
+    final_df = add_cn_info_to_indel_snv_maf(indel_snv_maf, chrom_map, sex)
 
     final_output_filepath = os.path.join(output_dir, '{}_pyclone_ready.tsv'.format(handle))
-    sys.stdout.write("Writing output to {}...".format(final_output_filepath))
+    sys.stdout.write("Writing output to {}...\n".format(final_output_filepath))
+
+    sys.stdout.write("Filtering homozygous deletion sites out of output (major cn == 0)...\n")
+    sys.stdout.write("Length before filtering: {}\n".format(len(final_df)))
+    final_df = final_df[final_df['major_cn'] > 0]
+    sys.stdout.write("Length after filtering: {}\n".format(len(final_df)))
 
     final_df.to_csv(final_output_filepath, sep='\t',
                     columns=['mutation_id', MafCols.REF_COUNT, MafCols.ALT_COUNT, 'normal_cn', 'major_cn', 'minor_cn', MafCols.CHR, MafCols.START, MafCols.END, MafCols.CLASSIFICATION, MafCols.TYPE],
                     header=['mutation_id', 'ref_counts', 'var_counts', 'normal_cn', 'major_cn', 'minor_cn', MafCols.CHR, MafCols.START, MafCols.END, MafCols.CLASSIFICATION, MafCols.TYPE], index=False)
 
-    sys.stdout.write("Done!")
+    sys.stdout.write("Done!\n")
 
 
 if __name__ == '__main__':
