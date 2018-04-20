@@ -1,4 +1,4 @@
-# PyCloneTSVGenerationWithTitan
+# PyCloneTSVGeneration_FACETS_or_TITAN
 Combine snv maf, indel maf, and TITAN or FACETS allelic copy number calls to generate the tab-delimited file used as input to
 PyClone's build_mutations_file script. Use the 'titan_output' flag to specify a TITAN CNA file, and the 'facets_output' flag to specify a FACETS CNA file.
 
