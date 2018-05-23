@@ -92,16 +92,17 @@ def total_copy_number_based_on_sex_and_chrom(sex, chrom):
     if chrom in ['X', 'Y']:
         if sex == 'female':
             assert(chrom == 'X')
-            return 2
+            return int(2)
         elif sex == 'male':
-            return 1
+            return int(1)
     else:
-        return DEFAULT_CELL_COPY_NUMBER
+        return int(DEFAULT_CELL_COPY_NUMBER)
 
 
 def build_chrom_map(titan_df, sex, input_type='titan'):
     """Given a dataframe of Titan data, build a dictionary where the chromosomes are the keys and the values
     are the segments"""
+    sys.stdout.write("Building chromosome map for CNA data...\n")
     chr_map = defaultdict(lambda: defaultdict(dict))
     for index, row in titan_df.iterrows():
         if input_type == 'titan':
@@ -121,11 +122,12 @@ def build_chrom_map(titan_df, sex, input_type='titan'):
             except:
                 pass
 
-        chr_map[chrom][start] = {"end": end,
-                                 "major_cn": major_cn,
-                                 "minor_cn": minor_cn,
-                                 "normal_cn": total_copy_number_based_on_sex_and_chrom(sex, chrom)
-                                 }
+        if not (chrom == 'Y' and sex == 'female'):
+            chr_map[chrom][start] = {"end": end,
+                                     "major_cn": major_cn,
+                                     "minor_cn": minor_cn,
+                                     "normal_cn": total_copy_number_based_on_sex_and_chrom(sex, chrom)
+                                     }
     return chr_map
 
 
@@ -140,16 +142,18 @@ def add_cn_info_to_indel_snv_maf(indel_snv_maf, chrom_map, sex):
         position = combined_maf_row["Center_Position"]
 
         if chrom not in all_chrs:
-            return DEFAULT_MAJOR_COPY_NUMBER, DEFAULT_MINOR_COPY_NUMBER, total_copy_number_based_on_sex_and_chrom(sex, chrom)
+            return int(DEFAULT_MAJOR_COPY_NUMBER), int(DEFAULT_MINOR_COPY_NUMBER), total_copy_number_based_on_sex_and_chrom(
+                sex, chrom)
         else:
             starts = list(chrom_map[chrom].keys())
             start_index = np.searchsorted(starts, position)
             relevant_start = starts[start_index - 1]
             seg = chrom_map[chrom][relevant_start]
             if seg.get("end") >= position:
-                return seg.get("major_cn"), seg.get("minor_cn"), seg.get("normal_cn")
+                return int(seg.get("major_cn")), int(seg.get("minor_cn")), int(seg.get("normal_cn"))
             else:
-                return DEFAULT_MAJOR_COPY_NUMBER, DEFAULT_MINOR_COPY_NUMBER, total_copy_number_based_on_sex_and_chrom(sex, chrom)
+                return int(DEFAULT_MAJOR_COPY_NUMBER), int(DEFAULT_MINOR_COPY_NUMBER), total_copy_number_based_on_sex_and_chrom(
+                    sex, chrom)
     cn_info = indel_snv_maf.apply(major_and_minor_cns, axis=1)
 
     # Get a series with a major_cn and minor_cn column of out this Series of tuples
@@ -164,8 +168,11 @@ def get_sex(snv_maf):
     chromosomes = snv_maf['Chromosome'].unique()
     y_in_sample = 'Y' in chromosomes
     if y_in_sample:
+        sys.stdout.write('Y chromosome found in sample SNV file. Determining male sex. \n')
         return 'male'
     else:
+        sys.stdout.write('Y chromosome not found in sample SNV. Determining female sex. Will ignore any Y chromosome '
+                         'information from other files. \n')
         return 'female'
 
 
@@ -200,7 +207,13 @@ def main():
     output_dir = args.output_dir
 
     snv_maf_df = pd.read_csv(snv_maf, delimiter='\t', comment='#', header='infer')
-    indel_maf_df = pd.read_csv(indel_maf, delimiter='\t', comment='#', skiprows=3, encoding="ISO-8859-1", header='infer')
+
+    sex = get_sex(snv_maf_df)
+    indel_maf_df = pd.read_csv(indel_maf, delimiter='\t', comment='#', skiprows=3, encoding="ISO-8859-1",
+                               header='infer')
+    if sex == 'female':
+        # if there are no SNVs on the Y chromosome then let's ignore the data on Y chromosome for indels as well
+        indel_maf_df = indel_maf_df[indel_maf_df.Chromosome != 'Y']
 
     sys.stdout.write("Combining SNV and indel maf file data...\n")
     indel_snv_maf = combine_snv_and_indel_mafs(snv_maf_df, indel_maf_df)
@@ -209,7 +222,6 @@ def main():
     cn_df = pd.read_csv(cn_output, delimiter='\t', comment='#', header='infer')
 
     # Build a data structure that allows for easier searching across the CNA data
-    sex = get_sex(snv_maf_df)
     chrom_map = build_chrom_map(cn_df, sex, input_type)
 
     sys.stdout.write("Merging copy number, SNV, and indel information...\n")
@@ -223,9 +235,16 @@ def main():
     final_df = final_df[final_df['major_cn'] > 0]
     sys.stdout.write("Length after filtering: {}\n".format(len(final_df)))
 
+    final_df[MafCols.REF_COUNT] = final_df[MafCols.REF_COUNT].fillna(0)
+    final_df[MafCols.REF_COUNT] = final_df[MafCols.REF_COUNT].astype(int)
+    final_df[MafCols.ALT_COUNT] = final_df[MafCols.ALT_COUNT].fillna(0)
+    final_df[MafCols.ALT_COUNT] = final_df[MafCols.ALT_COUNT].astype(int)
+
     final_df.to_csv(final_output_filepath, sep='\t',
-                    columns=['mutation_id', MafCols.REF_COUNT, MafCols.ALT_COUNT, 'normal_cn', 'major_cn', 'minor_cn', MafCols.CHR, MafCols.START, MafCols.END, MafCols.CLASSIFICATION, MafCols.TYPE],
-                    header=['mutation_id', 'ref_counts', 'var_counts', 'normal_cn', 'major_cn', 'minor_cn', MafCols.CHR, MafCols.START, MafCols.END, MafCols.CLASSIFICATION, MafCols.TYPE], index=False)
+                    columns=['mutation_id', MafCols.REF_COUNT, MafCols.ALT_COUNT, 'normal_cn', 'major_cn', 'minor_cn',
+                             MafCols.CHR, MafCols.START, MafCols.END, MafCols.CLASSIFICATION, MafCols.TYPE],
+                    header=['mutation_id', 'ref_counts', 'var_counts', 'normal_cn', 'major_cn', 'minor_cn',
+                            MafCols.CHR, MafCols.START, MafCols.END, MafCols.CLASSIFICATION, MafCols.TYPE], index=False)
 
     sys.stdout.write("Done!\n")
 
